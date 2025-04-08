@@ -8,38 +8,42 @@ export const config = {
 };
 
 export default async function handler(req, res) {
-  try {
-    // Проверяем, что метод запроса POST
-    if (req.method !== "POST") {
-      res.setHeader("Allow", "POST");
-      return res.status(405).json({ error: "Method Not Allowed" });
-    }
+  // Обработка preflight OPTIONS-запроса
+  if (req.method === "OPTIONS") {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    res.status(200).end();
+    return;
+  }
 
-    // Считываем "сырое" тело запроса (raw body)
+  // Если метод не POST, возвращаем 405
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST, OPTIONS");
+    return res.status(405).json({ error: "Method Not Allowed" });
+  }
+
+  try {
+    // Чтение raw тела запроса
     const rawBody = await new Promise((resolve, reject) => {
       let data = "";
-      req.on("data", (chunk) => {
-        data += chunk;
-      });
-      req.on("end", () => {
-        resolve(data);
-      });
+      req.on("data", (chunk) => { data += chunk; });
+      req.on("end", () => resolve(data));
       req.on("error", (err) => reject(err));
     });
 
-    // Логирование rawBody, длины и типа запроса
+    // Логирование для проверки
     console.log("Incoming request method:", req.method);
     console.log("Incoming request headers:", req.headers);
     console.log("Raw body length:", rawBody.length);
     console.log("Raw body:", rawBody);
 
-    // Проверяем, что rawBody не пустой
     if (!rawBody || rawBody.length === 0) {
       console.error("Empty request body detected.");
       return res.status(400).json({ error: "Empty request body" });
     }
 
-    // Проксируем запрос на Solana RPC
+    // Проксирование запроса к Solana RPC
     const rpcResponse = await fetch("https://api.mainnet-beta.solana.com", {
       method: "POST",
       headers: {
@@ -48,11 +52,9 @@ export default async function handler(req, res) {
       body: rawBody,
     });
 
-    // Логирование ответа от RPC-ноде
     const rpcResponseText = await rpcResponse.text();
     console.log("RPC raw response:", rpcResponseText);
 
-    // Попытка парсинга ответа в JSON
     let rpcData;
     try {
       rpcData = JSON.parse(rpcResponseText);
@@ -61,7 +63,8 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "Failed to parse RPC response" });
     }
 
-    // Отправляем клиенту ответ в виде JSON
+    // Возвращаем ответ клиенту и добавляем нужный CORS заголовок
+    res.setHeader("Access-Control-Allow-Origin", "*");
     res.status(200).json(rpcData);
   } catch (err) {
     console.error("Proxy error:", err);
